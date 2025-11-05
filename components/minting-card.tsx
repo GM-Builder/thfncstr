@@ -34,7 +34,7 @@ interface MintingCardProps {
 }
 
 const TOTAL_IMAGES = 100
-const LOOP_INTERVAL_MS = 150
+const LOOP_INTERVAL_MS = 100
 
 const generateLoopOrder = () => {
     const order: number[] = []
