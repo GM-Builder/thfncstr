@@ -431,24 +431,20 @@ export default function MintingCard({ address }: MintingCardProps) {
   }
 
   const handleShareToCast = () => {
-      const liveAppUrl = "https://thfncstr.vercel.app/";
+      const miniAppUrl = "https://farcaster.xyz/miniapps/6fh_i3HvDXkG/the-funcaster";
       
-      if (!mintedTokenId) {
-          const fallbackText = encodeURIComponent(
-              `🎉 I just discovered The Funcaster! Time to Mint your favorite NFT. %23TheFuncaster`
-          );
-          window.open(`https://warpcast.com/~/compose?text=${fallbackText}&embeds[]=${liveAppUrl}`, "_blank");
-          return;
+      let rawCastText = `🎉 I just minted Funcaster NFT #${mintedTokenId || 'unknown'}!\n`;
+      rawCastText += `Check out The Funcaster Mini App here: ${miniAppUrl}\n`;
+      
+      if (mintedImageUrl) {
+          rawCastText += `\n[NFT Image] ${mintedImageUrl}`; 
+      } else {
+          rawCastText += `%23TheFuncaster %23Funcaster`;
       }
-
-      const rawCastText = 
-          `🎉 I just minted Funcaster NFT #${mintedTokenId}!\n` +
-          `Check the link below to Mint yours.\n` +
-          `%23TheFuncaster %23Funcaster`;
 
       const castText = encodeURIComponent(rawCastText);
 
-      const castShareUrl = `https://warpcast.com/~/compose?text=${castText}&embeds[]=${liveAppUrl}`;
+      const castShareUrl = `https://warpcast.com/~/compose?text=${castText}&embeds[]=${miniAppUrl}`;
 
       window.open(castShareUrl, "_blank");
   };
