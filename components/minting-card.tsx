@@ -17,12 +17,12 @@ import {
 } from "./ui/alert-dialog"
 import { Spinner } from "./ui/spinner"
 
-const WARPLETS_ADDRESS = "0x699727f9e01a822efdcf7333073f0461e5914b4e" as const
-const FUNCASTER_ADDRESS = "0xC1de435091e6322a0affBDdD11d0C22B223eCEDc" as const
+const WARPLETS_ADDRESS = (process.env.NEXT_PUBLIC_WARPLETS_ADDRESS || "0x699727f9e01a822efdcf7333073f0461e5914b4e") as `0x${string}`
+const FUNCASTER_ADDRESS = (process.env.NEXT_PUBLIC_FUNCASTER_ADDRESS || "0xfc3EFAdEBcB41c0a151431F518e06828DA03841a") as `0x${string}`
 
-// Pinata base URIs (provided)
-const METADATA_BASE = "https://chocolate-brilliant-galliform-191.mypinata.cloud/ipfs/bafybeih4eat5zptl3ll2phhyeij6glgnipi6ixsnssuac5tjvhs5cy3t2i/"
-const IMAGES_BASE = "https://chocolate-brilliant-galliform-191.mypinata.cloud/ipfs/bafybeie4gmevlia7jbxcnqyelotdor7dvmfklkv3f7mqnahkdjwetd6yne/"
+const METADATA_BASE = process.env.NEXT_PUBLIC_METADATA_BASE || "https://chocolate-brilliant-galliform-191.mypinata.cloud/ipfs/bafybeih4eat5zptl3ll2phhyeij6glgnipi6ixsnssuac5tjvhs5cy3t2i/"
+const IMAGES_BASE = process.env.NEXT_PUBLIC_IMAGES_BASE || "https://chocolate-brilliant-galliform-191.mypinata.cloud/ipfs/bafybeie4gmevlia7jbxcnqyelotdor7dvmfklkv3f7mqnahkdjwetd6yne/"
+
 
 const publicClient = createPublicClient({
   chain: base,
@@ -53,7 +53,11 @@ export default function MintingCard({ address }: MintingCardProps) {
   const validAddress = address && isAddress(address) ? (address as `0x${string}`) : undefined
   const ipfsToGateway = (u?: string | null) => {
     if (!u) return null
-    if (u.startsWith("ipfs://")) return u.replace("ipfs://", "https://ipfs.io/ipfs/")
+    // Use Pinata gateway for consistency
+    if (u.startsWith("ipfs://")) {
+      const hash = u.replace("ipfs://", "")
+      return `https://chocolate-brilliant-galliform-191.mypinata.cloud/ipfs/${hash}`
+    }
     return u
   }
 
@@ -99,6 +103,7 @@ export default function MintingCard({ address }: MintingCardProps) {
       try {
         setEligibilityLoading(true)
 
+        // Check if user already owns a Funcaster NFT
         const funcasterBalance = await publicClient.readContract({
           address: FUNCASTER_ADDRESS,
           abi: NFT_ABI,
@@ -109,6 +114,7 @@ export default function MintingCard({ address }: MintingCardProps) {
         const ownsNFT = funcasterBalance && typeof funcasterBalance === "bigint" ? funcasterBalance > BigInt(0) : false
 
         if (ownsNFT) {
+          // User already owns a Funcaster NFT - fetch their token ID
           try {
             const tokenId = (await publicClient.readContract({
               address: FUNCASTER_ADDRESS,
@@ -123,6 +129,7 @@ export default function MintingCard({ address }: MintingCardProps) {
             setAlreadyOwnsNFT(true)
             setMintingComplete(true)
 
+            // Resolve image for existing NFT
             setIsResolving(true)
             const imageUrl = await resolveImageForToken(tokenIdStr)
             if (imageUrl) {
@@ -142,6 +149,7 @@ export default function MintingCard({ address }: MintingCardProps) {
           return
         }
 
+        // Check Warplets eligibility if user doesn't own a Funcaster yet
         const balance = await publicClient.readContract({
           address: WARPLETS_ADDRESS,
           abi: NFT_ABI,
@@ -199,13 +207,51 @@ export default function MintingCard({ address }: MintingCardProps) {
       setIsMinting(true)
       toast({
         title: "Minting Started",
+        description: "Fetching your Warplets FID...",
+      })
+
+      // Get user's Warplets FID
+      let warpletsFID: bigint
+      try {
+        const warpletsBalance = await publicClient.readContract({
+          address: WARPLETS_ADDRESS,
+          abi: NFT_ABI,
+          functionName: "balanceOf",
+          args: [validAddress],
+        }) as unknown as bigint
+
+        if (warpletsBalance === BigInt(0)) {
+          throw new Error("You don't own any Warplets NFT")
+        }
+
+        // Get the first Warplets token ID owned by user
+        warpletsFID = (await publicClient.readContract({
+          address: WARPLETS_ADDRESS,
+          abi: NFT_ABI,
+          functionName: "tokenOfOwnerByIndex",
+          args: [validAddress, BigInt(0)],
+        })) as unknown as bigint
+
+        console.log("Using Warplets FID:", warpletsFID.toString())
+      } catch (error) {
+        setIsMinting(false)
+        toast({
+          title: "Error",
+          description: "Failed to fetch your Warplets FID. Please try again.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      toast({
+        title: "Minting Started",
         description: "Check your Farcaster wallet to confirm the transaction...",
       })
 
       const data = encodeFunctionData({
         abi: NFT_ABI as any[],
         functionName: "claimFuncaster",
-        args: [BigInt(0)],
+        args: [warpletsFID], // ✅ BENAR - gunakan FID yang sebenarnya
       })
 
           // Read current totalMinted before sending tx so we can infer the minted tokenId after
@@ -332,14 +378,23 @@ export default function MintingCard({ address }: MintingCardProps) {
                 }
               }
             } catch (err) {
-              const tokenIdFallback = hash.slice(2, 12)
+              // Fallback: gunakan prevTotal + 1 jika ada, atau tampilkan error
+              let tokenIdFallback = "unknown"
+              if (prevTotal !== null) {
+                tokenIdFallback = (prevTotal + BigInt(1)).toString()
+              }
+              
               setMintedTokenId(tokenIdFallback)
               setMintingComplete(true)
               setShowSuccessModal(true)
-              resolveImageForToken(tokenIdFallback).then((url) => {
-                if (url) setMintedImageUrl(url)
-              })
-              setResolveError(String(err))
+              
+              if (tokenIdFallback !== "unknown") {
+                resolveImageForToken(tokenIdFallback).then((url) => {
+                  if (url) setMintedImageUrl(url)
+                })
+              }
+              
+              setResolveError("Could not confirm token ID from receipt. Please check Basescan.")
               console.warn("Could not confirm receipt, using fallback token id", err)
             } finally {
               setIsResolving(false)
