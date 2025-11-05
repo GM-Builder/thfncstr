@@ -1,0 +1,1 @@
+export const MINTING_SUCCESS_MODAL_DEPRECATED = true
