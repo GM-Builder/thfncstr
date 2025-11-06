@@ -38,8 +38,8 @@ const frameEmbed = {
 
 
 export const metadata: Metadata = {
-  title: "NFT Minting",
-  description: "Simple NFT Minting Page",
+  title: "The Funcaster",
+  description: "is a 10,000 supply NFT for Warplets holders on Base. It uniquely ties your Warplets FID to deterministically generated art.",
   icons: {
     icon: "/favicon.ico",
   },
