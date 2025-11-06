@@ -60,6 +60,7 @@ export default function MintingCard({ address }: MintingCardProps) {
   const [isMinting, setIsMinting] = useState(false)
   const [mintPrice, setMintPrice] = useState<bigint | null>(null)
   const [mintedTokenId, setMintedTokenId] = useState<string | null>(null)
+  const [mintedAssetId, setMintedAssetId] = useState<string | null>(null)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [mintingComplete, setMintingComplete] = useState(false)
   const [mintedImageUrl, setMintedImageUrl] = useState<string | null>(null)
@@ -83,7 +84,51 @@ export default function MintingCard({ address }: MintingCardProps) {
     return u
   }
 
+  const getAssetIdFromTokenId = async (tokenId: string): Promise<string | null> => {
+    try {
+      const assetId = await publicClient.readContract({
+        address: FUNCASTER_ADDRESS,
+        abi: NFT_ABI,
+        functionName: "tokenIdToAssetId",
+        args: [BigInt(tokenId)],
+      })
+      return assetId ? String(assetId) : null
+    } catch (error) {
+      console.error("Error getting assetId from tokenId:", error)
+      return null
+    }
+  }
+
+  const resolveImageForAsset = async (assetId: string) => {
+    const directImageUrl = `${IMAGES_BASE}${assetId}.jpeg`
+    
+    try {
+      const r = await fetch(directImageUrl, { method: "HEAD" })
+      if (r.ok) return directImageUrl
+    } catch (e) {
+      console.error("Error fetching direct image:", e)
+    }
+
+    const exts = [".png", ".jpg", ".webp", ""]
+    for (const ext of exts) {
+      const candidate = `${IMAGES_BASE}${assetId}${ext}`
+      try {
+        const r = await fetch(candidate, { method: "HEAD" })
+        if (r.ok) return candidate
+      } catch {
+      }
+    }
+
+    return null
+  }
+
   const resolveImageForToken = async (tokenId: string) => {
+    const assetId = await getAssetIdFromTokenId(tokenId)
+    if (assetId) {
+      const imageUrl = await resolveImageForAsset(assetId)
+      if (imageUrl) return imageUrl
+    }
+
     const candidates = [
       `${METADATA_BASE}${tokenId}.json`,
       `${METADATA_BASE}${tokenId}`,
@@ -95,16 +140,6 @@ export default function MintingCard({ address }: MintingCardProps) {
         const json = await res.json()
         if (json?.image) return ipfsToGateway(json.image) || json.image
       } catch (e) {
-      }
-    }
-
-    const exts = [".png", ".jpg", ".jpeg", ".webp", ""]
-    for (const ext of exts) {
-      const candidate = `${IMAGES_BASE}${tokenId}${ext}`
-      try {
-        const r = await fetch(candidate, { method: "HEAD" })
-        if (r.ok) return candidate
-      } catch {
       }
     }
 
@@ -156,15 +191,26 @@ export default function MintingCard({ address }: MintingCardProps) {
             setMintingComplete(true)
 
             setIsResolving(true)
-            const imageUrl = await resolveImageForToken(tokenIdStr)
-            if (imageUrl) {
-              setMintedImageUrl(imageUrl)
+            
+            const assetId = await getAssetIdFromTokenId(tokenIdStr)
+            if (assetId) {
+              setMintedAssetId(assetId)
+              const imageUrl = await resolveImageForAsset(assetId)
+              if (imageUrl) {
+                setMintedImageUrl(imageUrl)
+              }
+            } else {
+              const imageUrl = await resolveImageForToken(tokenIdStr)
+              if (imageUrl) {
+                setMintedImageUrl(imageUrl)
+              }
             }
+            
             setIsResolving(false)
 
             toast({
               title: "NFT Found!",
-              description: `You already own Funcaster NFT #${tokenIdStr}`,
+              description: `You already own Funcaster NFT #${tokenIdStr}${assetId ? ` (Asset #${assetId})` : ''}`,
             })
           } catch (error) {
             console.error("Error fetching existing NFT:", error)
@@ -335,6 +381,7 @@ export default function MintingCard({ address }: MintingCardProps) {
               if ((receipt as any).status) {
                 let decodedTokenId: string | null = null
                 let decodedAssetId: string | null = null
+                
                 for (const log of (receipt as any).logs ?? []) {
                   try {
                     const d = decodeEventLog({ abi: NFT_ABI as any[], data: log.data, topics: log.topics }) as any
@@ -353,6 +400,8 @@ export default function MintingCard({ address }: MintingCardProps) {
                 }
 
                 let finalTokenId: string | null = null
+                let finalAssetId: string | null = decodedAssetId
+
                 if (decodedTokenId) {
                   finalTokenId = decodedTokenId
                 } else {
@@ -377,39 +426,50 @@ export default function MintingCard({ address }: MintingCardProps) {
                   setMintingComplete(true)
                   setShowSuccessModal(true)
 
-                  try {
-                    if (decodedAssetId) {
-                      const img = `${IMAGES_BASE}${decodedAssetId}.jpeg`
-                      setMintedImageUrl(img)
-                    }
-
-                    const tokenUriRes = await publicClient.readContract({
-                      address: FUNCASTER_ADDRESS,
-                      abi: NFT_ABI,
-                      functionName: "tokenURI",
-                      args: [BigInt(finalTokenId)],
-                    })
-                    const tokenUri = typeof tokenUriRes === "string" ? tokenUriRes : String(tokenUriRes)
-                    if (tokenUri) {
-                      try {
-                        const metaUrl = tokenUri.startsWith("ipfs://") ? ipfsToGateway(tokenUri) || tokenUri : tokenUri
-                        const metaResp = await fetch(metaUrl)
-                        if (metaResp.ok) {
-                          const meta = await metaResp.json()
-                          const img = ipfsToGateway(meta.image) || meta.image
-                          if (img) setMintedImageUrl(img)
-                        } else {
-                          const fallback = await resolveImageForToken(finalTokenId)
-                          if (fallback) setMintedImageUrl(fallback)
-                        }
-                      } catch (e) {
-                        const fallback = await resolveImageForToken(finalTokenId)
-                        if (fallback) setMintedImageUrl(fallback)
+                  if (finalAssetId) {
+                    setMintedAssetId(finalAssetId)
+                    try {
+                      const img = await resolveImageForAsset(finalAssetId)
+                      if (img) {
+                        setMintedImageUrl(img)
                       }
+                    } catch (e) {
+                      console.error("Error resolving image for assetId:", e)
                     }
-                  } catch (e) {
-                    const fallback = await resolveImageForToken(finalTokenId)
-                    if (fallback) setMintedImageUrl(fallback)
+                  } else {
+                    try {
+                      const assetId = await getAssetIdFromTokenId(finalTokenId)
+                      if (assetId) {
+                        setMintedAssetId(assetId)
+                        const img = await resolveImageForAsset(assetId)
+                        if (img) {
+                          setMintedImageUrl(img)
+                        }
+                      } else {
+                        const tokenUriRes = await publicClient.readContract({
+                          address: FUNCASTER_ADDRESS,
+                          abi: NFT_ABI,
+                          functionName: "tokenURI",
+                          args: [BigInt(finalTokenId)],
+                        })
+                        const tokenUri = typeof tokenUriRes === "string" ? tokenUriRes : String(tokenUriRes)
+                        if (tokenUri) {
+                          try {
+                            const metaUrl = tokenUri.startsWith("ipfs://") ? ipfsToGateway(tokenUri) || tokenUri : tokenUri
+                            const metaResp = await fetch(metaUrl)
+                            if (metaResp.ok) {
+                              const meta = await metaResp.json()
+                              const img = ipfsToGateway(meta.image) || meta.image
+                              if (img) setMintedImageUrl(img)
+                            }
+                          } catch (e) {
+                            console.error("Error fetching tokenURI metadata:", e)
+                          }
+                        }
+                      }
+                    } catch (e) {
+                      console.error("Error getting assetId:", e)
+                    }
                   }
                 }
               }
@@ -424,8 +484,15 @@ export default function MintingCard({ address }: MintingCardProps) {
               setShowSuccessModal(true)
               
               if (tokenIdFallback !== "unknown") {
-                resolveImageForToken(tokenIdFallback).then((url) => {
-                  if (url) setMintedImageUrl(url)
+                getAssetIdFromTokenId(tokenIdFallback).then(async (assetId) => {
+                  if (assetId) {
+                    setMintedAssetId(assetId)
+                    const url = await resolveImageForAsset(assetId)
+                    if (url) setMintedImageUrl(url)
+                  } else {
+                    const url = await resolveImageForToken(tokenIdFallback)
+                    if (url) setMintedImageUrl(url)
+                  }
                 })
               }
               
@@ -461,7 +528,8 @@ export default function MintingCard({ address }: MintingCardProps) {
   const handleShareToCast = () => {
     const miniAppUrl = "https://farcaster.xyz/miniapps/6fh_i3HvDXkG/the-funcaster";
     
-    const castText = `🎉 I just minted Funcaster NFT #${mintedTokenId || 'unknown'}!\n\nCheck out The Funcaster Mini App:`;
+    const displayId = mintedAssetId ? `Asset #${mintedAssetId}` : `#${mintedTokenId || 'unknown'}`
+    const castText = `🎉 I just minted Funcaster NFT ${displayId}!\n\nCheck out The Funcaster Mini App:`;
     const encodedText = encodeURIComponent(castText);
     
     const embeds: string[] = [];
@@ -498,74 +566,87 @@ export default function MintingCard({ address }: MintingCardProps) {
       <AlertDialog open={showSuccessModal} onOpenChange={(open) => { if (!open) setShowSuccessModal(false) }}>
         <AlertDialogContent className="sm:max-w-[480px] p-0 overflow-hidden">
           {/* Header with gradient */}
-          <div className="bg-gradient-to-r from-emerald-500 to-teal-500 p-6 text-white">
-            <div className="flex items-center justify-center mb-3">
-              <div className="bg-white/20 p-3 rounded-full">
-                <CheckCircle2 className="w-8 h-8" />
+          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 p-6 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iYSIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBwYXR0ZXJuVHJhbnNmb3JtPSJyb3RhdGUoNDUpIj48cGF0aCBkPSJNLTEwIDMwaDYwdjJoLTYweiIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIuMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNhKSIvPjwvc3ZnPg==')] opacity-20"></div>
+            <div className="relative z-10">
+              <div className="flex items-center justify-center mb-4">
+                <div className="bg-white/20 backdrop-blur-sm p-3 rounded-full">
+                  <CheckCircle2 className="w-12 h-12 text-white" />
+                </div>
               </div>
+              <AlertDialogTitle className="text-2xl font-bold text-white text-center">
+                Minting Successful! 🎉
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-emerald-50 text-center mt-2 text-sm">
+                Your Funcaster NFT #{mintedTokenId}{mintedAssetId && ` (Asset #${mintedAssetId})`} has been minted
+              </AlertDialogDescription>
             </div>
-            <AlertDialogTitle className="text-center text-2xl font-bold">
-              Minting Successful!
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-emerald-50 mt-2">
-              Your Funcaster NFT has been minted successfully
-            </AlertDialogDescription>
           </div>
 
           {/* Content */}
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-6">
             {/* NFT Preview */}
-            {mintedImageUrl && !isResolving && (
-              <div className="relative rounded-xl overflow-hidden border-2 border-slate-200">
+            <div className="relative aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl overflow-hidden shadow-lg">
+              {isResolving ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <Spinner className="w-10 h-10 text-emerald-600 mb-3" />
+                  <p className="text-sm text-slate-600 font-medium">Loading your NFT...</p>
+                </div>
+              ) : mintedImageUrl ? (
                 <img
                   src={mintedImageUrl}
-                  alt="Minted NFT"
-                  className="w-full aspect-square object-cover"
+                  alt="Your Funcaster NFT"
+                  className="w-full h-full object-cover"
                 />
-              </div>
-            )}
-
-            {/* Token Info */}
-            <div className="bg-slate-50 rounded-lg p-4 space-y-2">
-              {mintedTokenId && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-slate-600">Token ID</span>
-                  <span className="font-mono font-semibold text-slate-900">#{mintedTokenId}</span>
-                </div>
-              )}
-              {mintedTxHash && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-slate-600">Transaction</span>
-                  <button
-                    onClick={handleViewOnBasescan}
-                    className="flex items-center gap-1 text-sm font-mono text-blue-600 hover:text-blue-700"
-                  >
-                    {mintedTxHash.slice(0, 6)}...{mintedTxHash.slice(-4)}
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center space-y-2">
+                    <p className="text-sm text-slate-600 font-medium">NFT #{mintedTokenId}</p>
+                    {mintedAssetId && (
+                      <p className="text-xs text-slate-500">Asset #{mintedAssetId}</p>
+                    )}
+                    {resolveError && (
+                      <p className="text-xs text-amber-600 mt-2 max-w-[200px] mx-auto">{resolveError}</p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
-            {isResolving && (
-              <div className="flex items-center justify-center py-6 text-slate-600">
-                <Spinner className="w-5 h-5 mr-2" />
-                <span className="text-sm">Loading NFT metadata...</span>
+            {/* Transaction Info */}
+            <div className="bg-slate-50 rounded-xl p-4 space-y-3 border border-slate-200">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-600">Token ID</span>
+                <span className="text-sm font-mono font-bold text-slate-900">#{mintedTokenId}</span>
               </div>
-            )}
-
-            {resolveError && (
-              <div className="text-xs text-amber-600 bg-amber-50 p-3 rounded-lg">
-                {resolveError}
-              </div>
-            )}
+              
+              {mintedAssetId && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">Asset ID</span>
+                  <span className="text-sm font-mono font-bold text-emerald-600">#{mintedAssetId}</span>
+                </div>
+              )}
+              
+              {mintedTxHash && (
+                <>
+                  <div className="h-px bg-slate-200"></div>
+                  <button
+                    onClick={handleViewOnBasescan}
+                    className="flex items-center justify-between w-full text-sm text-blue-600 hover:text-blue-700 transition-colors group"
+                  >
+                    <span className="font-medium">View Transaction</span>
+                    <ExternalLink className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Actions */}
-          <AlertDialogFooter className="p-6 pt-0 flex-col sm:flex-col gap-2">
+          {/* Footer Actions */}
+          <AlertDialogFooter className="p-6 pt-0 flex-col sm:flex-col gap-3">
             <Button
               onClick={handleShareToCast}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-5 text-base"
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-5 text-base"
               disabled={isResolving}
             >
               <Share2 className="w-4 h-4 mr-2" />
@@ -644,7 +725,7 @@ export default function MintingCard({ address }: MintingCardProps) {
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-blue-900">
-                    You own NFT #{mintedTokenId}
+                    You own NFT #{mintedTokenId}{mintedAssetId && ` (Asset #${mintedAssetId})`}
                   </p>
                   <p className="text-xs text-blue-700 mt-0.5">
                     Already minted • View your NFT on OpenSea
