@@ -12,7 +12,7 @@ const APP_URL = "https://thfncstr.vercel.app"
 
 const miniappEmbed = {
   version: "1",
-  imageUrl: `${APP_URL}/image.png`, 
+  imageUrl: `${APP_URL}/banner.png`, 
   button: {
     title: "Mint Yours", 
     action: {
