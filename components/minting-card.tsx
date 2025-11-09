@@ -30,27 +30,25 @@ const publicClient = createPublicClient({
   transport: http(),
 })
 
-interface MintingCardProps {
-  address: string
-}
+const MAX_SUPPLY_HARDCODED = 10000
+const MINT_PRICE_HARDCODED = parseEther("0.00025")
 
-const TOTAL_IMAGES = 100
-const LOOP_INTERVAL_MS = 100
+const TOTAL_PREVIEW_IMAGES = 10
+const LOOP_INTERVAL_MS = 100 
 
 const generateLoopOrder = () => {
     const order: number[] = []
-    for (let j = 0; j < 10; j++) {
-      for (let i = 0; i < 10; i++) {
-        const index = (i * 10) + j + 1
-        if (index <= TOTAL_IMAGES) {
-          order.push(index)
-        }
-      }
+    for (let i = 1; i <= TOTAL_PREVIEW_IMAGES; i++) {
+        order.push(i)
     }
     return order
 }
 
 const loopOrder = generateLoopOrder()
+
+interface MintingCardProps {
+  address: string
+}
 
 export default function MintingCard({ address }: MintingCardProps) {
   const { toast } = useToast()
@@ -58,7 +56,7 @@ export default function MintingCard({ address }: MintingCardProps) {
   const [isHolder, setIsHolder] = useState(false)
   const [eligibilityLoading, setEligibilityLoading] = useState(true)
   const [isMinting, setIsMinting] = useState(false)
-  const [mintPrice, setMintPrice] = useState<bigint | null>(null)
+  const [mintPrice, setMintPrice] = useState<bigint | null>(MINT_PRICE_HARDCODED)
   const [mintedTokenId, setMintedTokenId] = useState<string | null>(null)
   const [mintedAssetId, setMintedAssetId] = useState<string | null>(null)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
@@ -71,7 +69,7 @@ export default function MintingCard({ address }: MintingCardProps) {
   const [existingTokenId, setExistingTokenId] = useState<string | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [totalMinted, setTotalMinted] = useState<number>(0)
-  const [maxSupply, setMaxSupply] = useState<number>(10000)
+  const [maxSupply, setMaxSupply] = useState<number>(MAX_SUPPLY_HARDCODED)
 
   const validAddress = address && isAddress(address) ? (address as `0x${string}`) : undefined
   
@@ -86,7 +84,6 @@ export default function MintingCard({ address }: MintingCardProps) {
 
   const getAssetIdFromTokenId = async (tokenId: string): Promise<string | null> => {
     try {
-      console.log(`[getAssetIdFromTokenId] Getting assetID for tokenId: ${tokenId}`)
       const result = await publicClient.readContract({
         address: FUNCASTER_ADDRESS,
         abi: NFT_ABI,
@@ -96,16 +93,13 @@ export default function MintingCard({ address }: MintingCardProps) {
       
       const assetId = typeof result === 'bigint' ? result : BigInt(String(result))
       const assetIdStr = assetId.toString()
-      console.log(`[getAssetIdFromTokenId] TokenId ${tokenId} → AssetId ${assetIdStr}`)
       return assetIdStr
     } catch (error) {
-      console.error(`[getAssetIdFromTokenId] Error getting assetId for tokenId ${tokenId}:`, error)
       return null
     }
   }
 
   const resolveImageForAsset = async (assetId: string): Promise<string | null> => {
-    console.log(`[resolveImageForAsset] Resolving image for assetId: ${assetId}`)
     
     const candidates = [
       `${IMAGES_BASE}${assetId}.jpeg`,
@@ -119,19 +113,16 @@ export default function MintingCard({ address }: MintingCardProps) {
       try {
         const response = await fetch(imageUrl, { method: "HEAD" })
         if (response.ok) {
-          console.log(`[resolveImageForAsset] Found image: ${imageUrl}`)
           return imageUrl
         }
       } catch (error) {
       }
     }
     
-    console.warn(`[resolveImageForAsset] No image found for assetId: ${assetId}`)
     return null
   }
 
   const resolveImageForToken = async (tokenId: string): Promise<string | null> => {
-    console.log(`[resolveImageForToken] Resolving image for tokenId: ${tokenId}`)
     
     const assetId = await getAssetIdFromTokenId(tokenId)
     if (assetId) {
@@ -151,14 +142,12 @@ export default function MintingCard({ address }: MintingCardProps) {
         const json = await res.json()
         if (json?.image) {
           const imageUrl = ipfsToGateway(json.image) || json.image
-          console.log(`[resolveImageForToken] Found image from metadata: ${imageUrl}`)
           return imageUrl
         }
       } catch (e) {
       }
     }
 
-    console.warn(`[resolveImageForToken] No image found for tokenId: ${tokenId}`)
     return null
   }
 
@@ -192,7 +181,6 @@ export default function MintingCard({ address }: MintingCardProps) {
         const ownsNFT = funcasterBalance && typeof funcasterBalance === "bigint" ? funcasterBalance > BigInt(0) : false
 
         if (ownsNFT) {
-          console.log("[checkEligibility] User already owns Funcaster NFT")
           try {
             const tokenId = (await publicClient.readContract({
               address: FUNCASTER_ADDRESS,
@@ -202,7 +190,6 @@ export default function MintingCard({ address }: MintingCardProps) {
             })) as unknown as bigint
 
             const tokenIdStr = tokenId.toString()
-            console.log(`[checkEligibility] Existing tokenId: ${tokenIdStr}`)
             
             setExistingTokenId(tokenIdStr)
             setMintedTokenId(tokenIdStr)
@@ -213,17 +200,12 @@ export default function MintingCard({ address }: MintingCardProps) {
             
             const assetId = await getAssetIdFromTokenId(tokenIdStr)
             if (assetId) {
-              console.log(`[checkEligibility] Found assetId: ${assetId}`)
               setMintedAssetId(assetId)
               const imageUrl = await resolveImageForAsset(assetId)
               if (imageUrl) {
-                console.log(`[checkEligibility] Setting image: ${imageUrl}`)
                 setMintedImageUrl(imageUrl)
-              } else {
-                console.warn("[checkEligibility] Could not resolve image for assetId")
               }
             } else {
-              console.warn("[checkEligibility] Could not get assetId, trying fallback")
               const imageUrl = await resolveImageForToken(tokenIdStr)
               if (imageUrl) {
                 setMintedImageUrl(imageUrl)
@@ -237,7 +219,6 @@ export default function MintingCard({ address }: MintingCardProps) {
               description: `You already own Funcaster NFT #${tokenIdStr}${assetId ? ` (Asset #${assetId})` : ''}`,
             })
           } catch (error) {
-            console.error("[checkEligibility] Error fetching existing NFT:", error)
             setIsResolving(false)
           }
 
@@ -254,7 +235,6 @@ export default function MintingCard({ address }: MintingCardProps) {
 
         const holderStatus = balance && typeof balance === "bigint" ? balance > BigInt(0) : false
         setIsHolder(holderStatus)
-        console.log(`[checkEligibility] Warplets holder status: ${holderStatus}`)
 
         try {
           const minted = await publicClient.readContract({
@@ -268,29 +248,8 @@ export default function MintingCard({ address }: MintingCardProps) {
           setTotalMinted(0)
         }
 
-        try {
-          const supply = await publicClient.readContract({
-            address: FUNCASTER_ADDRESS,
-            abi: NFT_ABI,
-            functionName: "MAX_SUPPLY",
-            args: [],
-          })
-          setMaxSupply(typeof supply === "bigint" ? Number(supply) : 10000)
-        } catch {
-          setMaxSupply(10000)
-        }
-
-        try {
-          const price = await publicClient.readContract({
-            address: FUNCASTER_ADDRESS,
-            abi: NFT_ABI,
-            functionName: "MINT_PRICE",
-            args: [],
-          })
-          setMintPrice(typeof price === "bigint" ? price : null)
-        } catch {
-          setMintPrice(parseEther("0.00025"))
-        }
+        setMaxSupply(MAX_SUPPLY_HARDCODED)
+        setMintPrice(MINT_PRICE_HARDCODED)
 
         if (holderStatus) {
           toast({
@@ -307,7 +266,6 @@ export default function MintingCard({ address }: MintingCardProps) {
 
         setEligibilityLoading(false)
       } catch (error) {
-        console.error("[checkEligibility] Eligibility check error:", error)
         toast({
           title: "Error",
           description: "Failed to check eligibility. Please try again.",
@@ -325,7 +283,6 @@ export default function MintingCard({ address }: MintingCardProps) {
 
     try {
       setIsMinting(true)
-      console.log("[handleMint] Starting mint process")
       
       toast({
         title: "Minting Started",
@@ -352,7 +309,6 @@ export default function MintingCard({ address }: MintingCardProps) {
           args: [validAddress, BigInt(0)],
         })) as unknown as bigint
 
-        console.log(`[handleMint] Using Warplets FID: ${warpletsFID.toString()}`)
       } catch (error) {
         setIsMinting(false)
         toast({
@@ -382,7 +338,6 @@ export default function MintingCard({ address }: MintingCardProps) {
         },
         {
           onSuccess: async (hash) => {
-            console.log(`[handleMint] Transaction sent: ${hash}`)
             toast({
               title: "Success!",
               description: `Your Funcaster NFT is being minted! TX: ${hash.slice(0, 10)}...`,
@@ -393,11 +348,9 @@ export default function MintingCard({ address }: MintingCardProps) {
             setResolveError(null)
 
             try {
-              console.log("[handleMint] Waiting for transaction receipt...")
               const receipt = await publicClient.waitForTransactionReceipt({ hash })
               
               if ((receipt as any).status) {
-                console.log("[handleMint] Transaction confirmed!")
                 
                 let decodedTokenId: string | null = null
                 let decodedAssetId: string | null = null
@@ -415,23 +368,19 @@ export default function MintingCard({ address }: MintingCardProps) {
                       
                       if (args && args.tokenId != null) {
                         decodedTokenId = String(args.tokenId)
-                        console.log(`[handleMint] Decoded tokenId from event: ${decodedTokenId}`)
                       }
                       
                       if (args && args.assetID != null) {
                         decodedAssetId = String(args.assetID)
-                        console.log(`[handleMint] Decoded assetID from event: ${decodedAssetId}`)
                       }
                       
                       break
                     }
                   } catch (err) {
-                    console.error("[handleMint] Error decoding log:", err)
                   }
                 }
 
                 if (decodedTokenId) {
-                  console.log(`[handleMint] Setting minted token ID: ${decodedTokenId}`)
                   setMintedTokenId(decodedTokenId)
                   setMintingComplete(true)
                   setShowSuccessModal(true)
@@ -439,32 +388,25 @@ export default function MintingCard({ address }: MintingCardProps) {
                   let finalAssetId = decodedAssetId
                   
                   if (!finalAssetId) {
-                    console.log("[handleMint] AssetID not in event, fetching from contract...")
                     finalAssetId = await getAssetIdFromTokenId(decodedTokenId)
                   }
 
                   if (finalAssetId) {
-                    console.log(`[handleMint] Using assetID: ${finalAssetId}`)
                     setMintedAssetId(finalAssetId)
                     
                     const imageUrl = await resolveImageForAsset(finalAssetId)
                     if (imageUrl) {
-                      console.log(`[handleMint] Setting minted image: ${imageUrl}`)
                       setMintedImageUrl(imageUrl)
                     } else {
-                      console.warn("[handleMint] Could not resolve image for assetID")
                       setResolveError("Image not found for this NFT")
                     }
                   } else {
-                    console.error("[handleMint] Could not get assetID!")
                     setResolveError("Could not determine NFT asset ID")
                   }
                 } else {
-                  console.warn("[handleMint] Could not decode tokenId from event")
                   setResolveError("Could not confirm token ID from transaction")
                 }
               } else {
-                console.error("[handleMint] Transaction failed")
                 toast({
                   title: "Transaction Failed",
                   description: "The minting transaction was reverted.",
@@ -472,7 +414,6 @@ export default function MintingCard({ address }: MintingCardProps) {
                 })
               }
             } catch (err) {
-              console.error("[handleMint] Error waiting for receipt:", err)
               setResolveError("Could not confirm transaction. Please check Basescan.")
             } finally {
               setIsResolving(false)
@@ -480,7 +421,6 @@ export default function MintingCard({ address }: MintingCardProps) {
             }
           },
           onError: (error) => {
-            console.error("[handleMint] Transaction error:", error)
             setIsMinting(false)
             toast({
               title: "Minting Error",
@@ -492,7 +432,6 @@ export default function MintingCard({ address }: MintingCardProps) {
       )
     } catch (error) {
       setIsMinting(false)
-      console.error("[handleMint] Mint error:", error)
       toast({
         title: "Minting Error",
         description: error instanceof Error ? error.message : "Failed to mint NFT. Please try again.",
@@ -532,18 +471,16 @@ export default function MintingCard({ address }: MintingCardProps) {
   }
 
   const currentImageId = loopOrder[currentImageIndex]
-  const currentImageUrl = `${IMAGES_BASE}${currentImageId}.jpeg`
+  const currentImageUrl = `/previews/${currentImageId}.jpeg`
   const remainingSupply = maxSupply - totalMinted
   const mintProgress = maxSupply > 0 ? (totalMinted / maxSupply) * 100 : 0
 
   return (
     <div>
-      {/* Success Modal */}
       <AlertDialog open={showSuccessModal} onOpenChange={(open) => { if (!open) setShowSuccessModal(false) }}>
         <AlertDialogContent className="sm:max-w-[480px] p-0 overflow-hidden">
-          {/* Header with gradient */}
           <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 p-6 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iYSIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBwYXR0ZXJuVHJhbnNmb3JtPSJyb3RhdGUoNDUpIj48cGF0aCBkPSJNLTEwIDMwaDYwdjJoLTYweiIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIuMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNhKSIvPjwvc3ZnPg==')] opacity-20"></div>
+            <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iYSIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBwYXR0ZXJuVHJhbnNmb3JtPSJyb3RhdGUoNDUpIj48cGF0aCBkPSJNLTEwIDMwaDZwdjJoLTYweiIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFhY2l0eT0iLjEiLz48L3BhdHRlcm4+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNhKSIvPjwvc3ZnPg==')] opacity-20"></div>
             <div className="relative z-10">
               <div className="flex items-center justify-center mb-4">
                 <div className="bg-white/20 backdrop-blur-sm p-3 rounded-full">
@@ -559,9 +496,7 @@ export default function MintingCard({ address }: MintingCardProps) {
             </div>
           </div>
 
-          {/* Content */}
           <div className="p-6 space-y-6">
-            {/* NFT Preview */}
             <div className="relative aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl overflow-hidden shadow-lg">
               {isResolving ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -589,7 +524,6 @@ export default function MintingCard({ address }: MintingCardProps) {
               )}
             </div>
 
-            {/* Transaction Info */}
             <div className="bg-slate-50 rounded-xl p-4 space-y-3 border border-slate-200">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-600">Token ID</span>
@@ -618,7 +552,6 @@ export default function MintingCard({ address }: MintingCardProps) {
             </div>
           </div>
 
-          {/* Footer Actions */}
           <AlertDialogFooter className="p-6 pt-0 flex-col sm:flex-col gap-3">
             <Button
               onClick={handleShareToCast}
@@ -640,10 +573,8 @@ export default function MintingCard({ address }: MintingCardProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Main Card */}
       <Card className="bg-white border-0 overflow-hidden shadow-xl">
         <div className="p-8 space-y-6">
-          {/* NFT Preview */}
           <div className="aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 rounded-2xl flex items-center justify-center overflow-hidden relative">
             {(mintingComplete && mintedTokenId) || alreadyOwnsNFT ? (
               <div className="relative w-full h-full">
@@ -688,14 +619,12 @@ export default function MintingCard({ address }: MintingCardProps) {
             )}
           </div>
 
-          {/* Title & Status */}
           <div className="space-y-4">
             <div>
               <h2 className="text-3xl font-bold text-slate-900">The Funcaster</h2>
               <p className="text-slate-600 text-sm mt-1">Exclusive NFT Collection on Base</p>
             </div>
 
-            {/* Status Badge */}
             {alreadyOwnsNFT ? (
               <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
@@ -734,11 +663,9 @@ export default function MintingCard({ address }: MintingCardProps) {
             )}
           </div>
 
-          {/* Supply & Price Info */}
           {!alreadyOwnsNFT && (
             <>
               <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 space-y-4 border border-slate-200">
-                {/* Supply Progress */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium text-slate-700">Supply</span>
@@ -760,7 +687,6 @@ export default function MintingCard({ address }: MintingCardProps) {
 
                 <div className="h-px bg-slate-200"></div>
 
-                {/* Price Info */}
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-slate-600">Mint Price</span>
                   <span className="text-lg font-bold text-slate-900">
@@ -769,7 +695,6 @@ export default function MintingCard({ address }: MintingCardProps) {
                 </div>
               </div>
 
-              {/* Mint Button */}
               <Button
                 onClick={handleMint}
                 disabled={!isHolder || isMinting || eligibilityLoading}
@@ -793,7 +718,6 @@ export default function MintingCard({ address }: MintingCardProps) {
                       : "Mint Yours"}
               </Button>
 
-              {/* Info Box */}
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <h4 className="text-sm font-semibold text-blue-900 mb-2">Minting Requirements</h4>
                 <ul className="space-y-1.5 text-xs text-blue-800">
